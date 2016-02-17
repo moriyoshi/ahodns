@@ -16,26 +16,45 @@ import (
 type SimpleARecordHandler struct {
 	Name string
 	Ttl uint32
-	Addr net.IP
+	V4Addrs []net.IP
+	V6Addrs []net.IP
 }
 
 func (h *SimpleARecordHandler) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
-	if req.Question[0].Qtype != dns.TypeA {
+	if req.Question[0].Qtype == dns.TypeA && len(h.V4Addrs) > 0 {
+		resp := new(dns.Msg)
+		resp.SetReply(req)
+		for _, addr := range h.V4Addrs {
+			resp.Answer = append(resp.Answer, &dns.A {
+				Hdr: dns.RR_Header {
+					Name: req.Question[0].Name,
+					Rrtype: dns.TypeA,
+					Class: dns.ClassINET,
+					Ttl: h.Ttl,
+				},
+				A: addr,
+			})
+		}
+		w.WriteMsg(resp)
+	} else if req.Question[0].Qtype == dns.TypeAAAA && len(h.V6Addrs) > 0 {
+		resp := new(dns.Msg)
+		resp.SetReply(req)
+		for _, addr := range h.V6Addrs {
+			resp.Answer = append(resp.Answer, &dns.AAAA {
+				Hdr: dns.RR_Header {
+					Name: req.Question[0].Name,
+					Rrtype: dns.TypeAAAA,
+					Class: dns.ClassINET,
+					Ttl: h.Ttl,
+				},
+				AAAA: addr,
+			})
+		}
+		w.WriteMsg(resp)
+	} else {
 		dns.HandleFailed(w, req)
 		return
 	}
-	resp := new(dns.Msg)
-	resp.SetReply(req)
-	resp.Answer = append(resp.Answer, &dns.A {
-		Hdr: dns.RR_Header {
-			Name: req.Question[0].Name,
-			Rrtype: dns.TypeA,
-			Class: dns.ClassINET,
-			Ttl: h.Ttl,
-		},
-		A: h.Addr,
-	})
-	w.WriteMsg(resp)
 }
 
 func makeServers(tpsString string, handler dns.Handler) ([]*dns.Server, error) {
@@ -68,6 +87,7 @@ func makeHandler(fileName string, ttl uint32) (*dns.ServeMux, error) {
 	defer f.Close()
 	rdr := bufio.NewReader(f)
 	ln := 0
+	pairs := make(map[string]*SimpleARecordHandler)
 	retval := dns.NewServeMux()
 	for {
 		ln += 1
@@ -91,8 +111,17 @@ func makeHandler(fileName string, ttl uint32) (*dns.ServeMux, error) {
 		if ip == nil {
 			return nil, fmt.Errorf("%s:%d invalid IP address format", fileName, ln)
 		}
-		retval.Handle(pair[0], &SimpleARecordHandler { Name: pair[0], Ttl: ttl, Addr: ip })
-
+		h, ok := pairs[pair[0]]
+		if !ok {
+			h = &SimpleARecordHandler { Name: pair[0], Ttl: ttl, V4Addrs: make([]net.IP, 0, 1), V6Addrs: make([]net.IP, 0, 1) }
+			pairs[pair[0]] = h
+			retval.Handle(pair[0], h)
+		}
+		if ip.To4() == nil {
+			h.V6Addrs = append(h.V6Addrs, ip)
+		} else {
+			h.V4Addrs = append(h.V4Addrs, ip)
+		}
 	}
 	return retval, nil
 }

@@ -20,5 +20,7 @@ It is a simple text file that contains a pair of a domain name and an IP address
 
 ```
 aho1	127.0.0.2
-aho2	127.0.0.3
+aho1	127.0.0.3
+aho2	127.0.0.4
+aho2	::ffff:127.0.0.5
 ```
